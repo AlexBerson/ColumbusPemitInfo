@@ -1,7 +1,7 @@
 # Stage 1: Build the application
 # Use the official Node.js 20 image as a base.
 # Using a specific version is better for reproducibility.
-FROM node:20-alpine AS builder
+FROM mcr.microsoft.com/playwright:v1.44.1-jammy AS builder
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
@@ -16,7 +16,7 @@ RUN npm ci
 COPY . .
 
 # Stage 2: Create the final, smaller production image
-FROM node:20-alpine
+FROM mcr.microsoft.com/playwright:v1.44.1-jammy
 
 WORKDIR /usr/src/app
 
