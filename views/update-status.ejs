@@ -53,14 +53,8 @@
         const result = await response.json();
 
         if (result.success) {
-            if (result.redirectUrl) {
-                logOutput.textContent += `\n\nUpdate complete! Redirecting...`;
-                eventSource.close();
-                window.location.href = result.redirectUrl;
-            } else {
-                logOutput.textContent += `\n\nUpdate complete! (Debug Mode)`;
-                eventSource.close();
-            }
+                logOutput.textContent += `\n\nUpdate complete!`;
+                eventSource.close();          
         } else {
             logOutput.textContent += `\n\nERROR: ${result.message}`;
             eventSource.close();
