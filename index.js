@@ -18,10 +18,9 @@ function logToClient(clientId, message) {
 }
 
 // Helper function to send a screenshot to a specific client
-async function logScreenshotToClient(page, clientId, message) {
-  // Only run this function if debug mode is explicitly enabled
-  if (process.env.DEBUG_MODE !== 'true') return;
-
+async function logScreenshotToClient(page, clientId, message, force = false) {
+  // Only take screenshots if debug mode is on, unless `force` is true.
+  if (process.env.DEBUG_MODE !== 'true' && !force) return;
   logToClient(clientId, message); // Send the text log first
   try {
     const imageBuffer = await page.screenshot({ type: 'png' });
@@ -231,7 +230,10 @@ router.post('/update-plate/:id', async (req, res) => {
 
     // Find the vehicle row and click the 'Set Active' checkbox
     logToClient(clientId, `Finding and checking new plate (${plateToActivate})...`);
-    const vehicleRow = page.locator('div.dti-tile-vehicle-lg', { hasText: plateToActivate });
+    // Make the selector more specific to avoid matching other text on the page.
+    // This finds the div that contains the link with the specific plate text.
+    const vehicleRow = page.locator('div.dti-tile-vehicle-lg', { has: page.locator('a[id*="_lnkVehiclePlate"]', { hasText: plateToActivate }) });
+
     const setActiveCheckbox = vehicleRow.locator('div[id$="_rgnCheckBox"]');
     await Promise.all([
         // This is the critical change: wait for the server response that explicitly
@@ -246,20 +248,17 @@ router.post('/update-plate/:id', async (req, res) => {
     // This click triggers a POST and a redirect. We'll wait for the navigation to fully complete.
     logToClient(clientId, 'Clicking "Update Permit" to save changes...');
     await Promise.all([
-      // Wait for the navigation that follows the click to be completely finished.
       page.locator('input[name*="btnContinue"][value="Update Permit"]').click(),
-      page.waitForURL('**/index.aspx', { waitUntil: 'networkidle' })
+      // Wait for the GET request to the dashboard page and confirm the response body
+      // contains the specific dashboard title element. This is a very reliable
+      // indicator that the final page has loaded successfully.
+      page.waitForResponse(async resp => resp.url().includes('index.aspx') && (await resp.text()).includes('<span id="ApplicationContent_PermitLayout_PermitDashboard_lblTitle">Permit Dashboard</span>')),
     ]);
 
-    await logScreenshotToClient(page, clientId, 'Final screenshot of dashboard after update.');
+    await logScreenshotToClient(page, clientId, 'Final screenshot of dashboard after update.', true);
 
-    if (process.env.DEBUG_MODE === 'true') {
-      logToClient(clientId, 'Debug mode active. Update complete. No redirect.');
-      res.json({ success: true, message: 'Update complete. Debug mode is active.' });
-    } else {
-      logToClient(clientId, 'Update successful! Redirecting to dashboard...');
-      res.json({ success: true, redirectUrl: '/' });
-    }
+    logToClient(clientId, 'Update successful! The screenshot above confirms the change.');
+    res.json({ success: true, message: 'Update complete. Please see the final screenshot for confirmation.' });
 
   } catch (error) {
     logToClient(clientId, `Error updating plate: ${error.message}`);
