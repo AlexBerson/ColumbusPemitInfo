@@ -150,7 +150,7 @@ router.post('/login/:id', async (req, res) => {
 
 
     logToClient(clientId, 'All data scraped. Rendering results.');
-    res.render('permits', { title: 'Your Active Permits', permits: activePermits });
+    res.render('permits', { title: 'Your Active Permits', permits: activePermits, baseUrl: BASE_URL });
 
   } catch (error) {
     console.error('An error occurred:', error.message);
