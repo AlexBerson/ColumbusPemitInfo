@@ -1,0 +1,22 @@
+{
+  "name": "aspnet-scraper-app",
+  "version": "1.0.0",
+  "description": "A webapp to interact with an ASP.NET site.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "axios",
+    "cheerio",
+    "express"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cheerio": "^1.0.0-rc.12",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2"
+  }
+}
