@@ -247,8 +247,8 @@ router.post('/update-plate/:id', async (req, res) => {
     logToClient(clientId, 'Clicking "Update Permit" to save changes...');
     await Promise.all([
       // Wait for the navigation that follows the click to be completely finished.
-      page.waitForURL('**/index.aspx', { waitUntil: 'networkidle' }),
-      page.locator('input[name*="btnContinue"][value="Update Permit"]').click()
+      page.locator('input[name*="btnContinue"][value="Update Permit"]').click(),
+      page.waitForURL('**/index.aspx', { waitUntil: 'networkidle' })
     ]);
 
     await logScreenshotToClient(page, clientId, 'Final screenshot of dashboard after update.');
