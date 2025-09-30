@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  app:
+    # Build the image from the Dockerfile in the current directory
+    build: .
+    # Override the default command to use our new 'dev' script for live reloading
+    command: npm run dev
+    # Map port 3000 on the host to port 3000 in the container
+    ports:
+      - "3000:3000"
+    # Mount the local source code into the container
+    volumes:
+      # Mounts the project directory to the container's working directory
+      - .:/usr/src/app
+      # Use an anonymous volume to prevent local node_modules from overwriting the container's
+      - /usr/src/app/node_modules
