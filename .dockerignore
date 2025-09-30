@@ -1,0 +1,4 @@
+# Exclude dependencies, as they are installed inside the container
+node_modules
+
+npm-debug.log
