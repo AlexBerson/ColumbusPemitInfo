@@ -6,8 +6,6 @@ A simple web application designed to automate the management of active vehicle l
 
 The application provides a clean web interface and uses Server-Sent Events (SSE) to give you real-time feedback as it performs actions on your behalf.
 
-NOTE: THIS PROVIDES NO AUTHENTICATION AND MUST BE SECURED BY A REVERSE PROXY OR KEPT PRIVATE.
-
 ## Features
 
 *   **Automatic Login:** Securely uses your credentials to log into the permit portal.
