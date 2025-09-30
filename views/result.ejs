@@ -1,0 +1,15 @@
+<%- include('partials/header') %>
+
+<div class="container mt-5">
+    <h1><%= title %></h1>
+    <p>This is a screenshot of the page state from the headless browser.</p>
+
+    <% if (typeof error !== 'undefined') { %>
+        <div class="alert alert-danger" role="alert"><strong>Error:</strong> <%= error %></div>
+    <% } %>
+
+    <img src="<%= imageSrc %>" class="img-fluid border shadow-sm" alt="Scraper Screenshot">
+
+</div>
+
+<%- include('partials/footer') %>

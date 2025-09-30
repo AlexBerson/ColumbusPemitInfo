@@ -1,0 +1,71 @@
+<%- include('partials/header') %>
+
+<div class="container mt-5">
+    <div class="jumbotron">
+        <h1 class="display-4">Updating Permit</h1>
+        <p class="lead">Please wait while we securely update your active vehicle. This may take a moment.</p>
+        <hr class="my-4">
+        <p><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> In progress...</p>
+
+        <div id="logContainer" class="mt-4">
+            <h4>Progress:</h4>
+            <pre id="logOutput" class="bg-dark text-white p-3 rounded" style="max-height: 400px; overflow-y: auto;"></pre>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', async function() {
+        const logOutput = document.getElementById('logOutput');
+        logOutput.textContent = 'Initializing update...';
+
+        // Parse details from the URL
+        const params = new URLSearchParams(window.location.search);
+        const detailPageUrl = params.get('detailPageUrl');
+        const plateToActivate = params.get('plateToActivate');
+        const currentPlate = params.get('currentPlate');
+
+        const clientId = `update-${Date.now()}`;
+        const eventSource = new EventSource(`/events/${clientId}`);
+
+        // Listener for standard text logs
+        eventSource.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            logOutput.textContent += `\n${data.log}`;
+            logOutput.scrollTop = logOutput.scrollHeight;
+        };
+
+        // Listener for our custom screenshot events
+        eventSource.addEventListener('screenshot', function(e) {
+            const data = JSON.parse(e.data);
+            const img = document.createElement('img');
+            img.src = data.imageSrc;
+            img.className = 'img-fluid border shadow-sm mt-2';
+            logOutput.parentElement.appendChild(img);
+        });
+
+        const response = await fetch(`/update-plate/${clientId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ detailPageUrl, plateToActivate, currentPlate })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            if (result.redirectUrl) {
+                logOutput.textContent += `\n\nUpdate complete! Redirecting...`;
+                eventSource.close();
+                window.location.href = result.redirectUrl;
+            } else {
+                logOutput.textContent += `\n\nUpdate complete! (Debug Mode)`;
+                eventSource.close();
+            }
+        } else {
+            logOutput.textContent += `\n\nERROR: ${result.message}`;
+            eventSource.close();
+        }
+    });
+</script>
+
+<%- include('partials/footer') %>

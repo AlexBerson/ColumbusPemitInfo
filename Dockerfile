@@ -1,6 +1,5 @@
-# Use an official Node.js runtime as a parent image.
-# The 'alpine' version is a lightweight Linux distribution.
-FROM node:20-alpine
+# Use the official Playwright image which includes Node.js and all browser dependencies.
+FROM mcr.microsoft.com/playwright:v1.44.1-jammy
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
@@ -10,6 +9,8 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Install app dependencies
+# Using "npm ci" is often better in CI/CD for reproducible builds
+# but "npm install" is fine for this project.
 RUN npm install
 
 # Bundle app source by copying everything else

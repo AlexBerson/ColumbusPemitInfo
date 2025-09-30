@@ -1,0 +1,48 @@
+<%- include('partials/header') %>
+
+<div class="container mt-5">
+    <div class="jumbotron">
+        <h1 class="display-4"><%= title %></h1>
+        <p class="lead">Please wait while we securely log in and fetch your permit information.</p>
+        <hr class="my-4">
+        <p><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading dashboard...</p>
+
+        <div id="logContainer" class="mt-4" style="display: none;">
+            <h4>Progress:</h4>
+            <pre id="logOutput" class="bg-dark text-white p-3 rounded" style="max-height: 300px; overflow-y: auto;"></pre>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Run the login process automatically when the page loads
+    document.addEventListener('DOMContentLoaded', async function() {
+        const logContainer = document.getElementById('logContainer');
+        const logOutput = document.getElementById('logOutput');
+
+        // Show the log container
+        logContainer.style.display = 'block';
+        logOutput.textContent = 'Initializing...';
+
+        // Generate a unique ID for this session
+        const clientId = Date.now().toString();
+
+        // Establish the Server-Sent Events connection
+        const eventSource = new EventSource(`/events/${clientId}`);
+        eventSource.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            logOutput.textContent += `\n${data.log}`;
+            logOutput.scrollTop = logOutput.scrollHeight; // Auto-scroll
+        };
+
+        // Make the actual login request
+        const response = await fetch(`/login/${clientId}`, { method: 'POST' });
+        
+        // When the fetch is complete, replace the entire page content with the result
+        document.open();
+        document.write(await response.text());
+        document.close();
+    });
+</script>
+
+<%- include('partials/footer') %>

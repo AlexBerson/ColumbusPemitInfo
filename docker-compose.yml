@@ -6,6 +6,8 @@ services:
     build: .
     # Override the default command to use our new 'dev' script for live reloading
     command: npm run dev
+    # Load environment variables from the .env file
+    env_file: .env
     # Map port 3000 on the host to port 3000 in the container
     ports:
       - "3000:3000"
