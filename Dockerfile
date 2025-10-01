@@ -25,6 +25,8 @@ COPY --from=builder /usr/src/app/node_modules ./node_modules
 # Copy the application code from the 'builder' stage
 COPY --from=builder /usr/src/app .
 
+RUN npx playwright install --with-deps
+
 # Expose the port the app runs on
 EXPOSE 3000
 
