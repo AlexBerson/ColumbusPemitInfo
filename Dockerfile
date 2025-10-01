@@ -1,7 +1,7 @@
 # Stage 1: Build the application
 # Use the official Node.js 20 image as a base.
 # Using a specific version is better for reproducibility.
-FROM mcr.microsoft.com/playwright:v1.50.0-noble AS builder
+FROM mcr.microsoft.com/playwright:v1.55.1-noble AS builder
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
