@@ -1,7 +1,7 @@
 # Stage 1: Build the application
 # Use the official Node.js 20 image as a base.
 # Using a specific version is better for reproducibility.
-FROM mcr.microsoft.com/playwright:v1.44.1-jammy AS builder
+FROM mcr.microsoft.com/playwright:v1.50.0-noble AS builder
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
@@ -14,16 +14,6 @@ RUN npm ci
 
 # Copy the rest of the application's source code
 COPY . .
-
-# Stage 2: Create the final, smaller production image
-FROM mcr.microsoft.com/playwright:v1.44.1-jammy
-
-WORKDIR /usr/src/app
-
-# Copy the installed node_modules from the 'builder' stage
-COPY --from=builder /usr/src/app/node_modules ./node_modules
-# Copy the application code from the 'builder' stage
-COPY --from=builder /usr/src/app .
 
 RUN npx playwright install --with-deps
 
