@@ -2,6 +2,8 @@
 
 ![Docker Image CI](https://github.com/alexberson/columbus-parking-pass/actions/workflows/docker-publish.yml/badge.svg)
 
+THIS IS AI GENERATED ALMOST COMPLETELY. Do NOT trust it to work correctly unless you're reviewing everything.
+
 A simple web application designed to automate the management of active vehicle license plates on the Columbus, OH parking permit website (`columbus.permitinfo.net`). It uses Playwright to perform browser automation, scraping your permit data and allowing you to switch the active plate with a single click, saving you the hassle of navigating the website manually.
 
 The application provides a clean web interface and uses Server-Sent Events (SSE) to give you real-time feedback as it performs actions on your behalf.
