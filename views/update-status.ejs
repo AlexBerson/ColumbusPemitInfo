@@ -53,10 +53,21 @@
         const result = await response.json();
 
         if (result.success) {
-                logOutput.textContent += `\n\nUpdate complete!`;
-                eventSource.close();          
+            logOutput.textContent += `\n\nUpdate complete!`;
+            // Add a button to return to the dashboard
+            const backBtn = document.createElement('a');
+            backBtn.href = '/';
+            backBtn.className = 'btn btn-success mt-3';
+            backBtn.textContent = 'Back to Dashboard';
+            logOutput.parentElement.appendChild(backBtn);
+            eventSource.close();          
         } else {
             logOutput.textContent += `\n\nERROR: ${result.message}`;
+            const backBtn = document.createElement('a');
+            backBtn.href = '/';
+            backBtn.className = 'btn btn-secondary mt-3';
+            backBtn.textContent = 'Back to Dashboard';
+            logOutput.parentElement.appendChild(backBtn);
             eventSource.close();
         }
     });

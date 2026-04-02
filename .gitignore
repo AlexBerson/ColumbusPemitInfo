@@ -3,6 +3,7 @@
 
 # Environment variables
 .env
+data.sqlite
 
 # Logs
 npm-debug.log

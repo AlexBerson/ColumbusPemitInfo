@@ -37,7 +37,33 @@
 </style>
 
 <div class="container mt-5">
-    <h1 class="mb-4">Permit Dashboard</h1>
+    <div class="d-flex justify-content-between align-items-center">
+        <h1 class="mb-4">Permit Dashboard</h1>
+        <div>
+            <button id="syncBtn" class="btn btn-primary">Sync</button>
+        </div>
+    </div>
+
+        <% 
+            let hasStale = false;
+            let latestSync = 0;
+            for (let i = 0; i < permits.length; i++) {
+                const p = permits[i];
+                if (p && p.stale) hasStale = true;
+                if (p && p.lastSynced && p.lastSynced > latestSync) latestSync = p.lastSynced;
+            }
+        %>
+
+        <% if (hasStale) { %>
+            <div id="staleBanner" class="alert alert-warning d-flex justify-content-between align-items-center" role="alert">
+                <div>
+                    <strong>Notice:</strong> Some cached permit data may be stale. Last sync: <span id="lastSyncedAge" data-ts="<%= latestSync %>"></span>.
+                </div>
+                <div>
+                    <button id="staleSyncBtn" class="btn btn-sm btn-warning">Sync Now</button>
+                </div>
+            </div>
+        <% } %>
 
     <div class="site-link-container">
         <p>
@@ -63,7 +89,12 @@
             <tbody>
                 <% permits.forEach(permit => { %>
                     <tr>
-                        <td data-label="Permit #"><%= permit.permitNo %></td>
+                            <td data-label="Permit #">
+                                <%= permit.permitNo %>
+                                <% if (permit.stale) { %>
+                                    <span class="badge bg-warning text-dark ms-2">Stale</span>
+                                <% } %>
+                            </td>
                         <td data-label="Status"><span class="badge <%= permit.status === 'Active' ? 'bg-success' : 'bg-danger' %>"><%= permit.status %></span></td>
                         <td data-label="Type"><%= permit.description %></td>
                         <td data-label="Valid From"><%= permit.validFrom %></td>
@@ -109,6 +140,55 @@
         // Redirect the user to the status page
         window.location.href = url;
     }
+</script>
+
+<script>
+    document.getElementById('syncBtn').addEventListener('click', async function() {
+        const btn = this;
+        btn.disabled = true;
+        btn.textContent = 'Syncing...';
+        try {
+            const res = await fetch('/sync/global', { method: 'POST' });
+            const text = await res.text();
+            // Replace current document with server response
+            document.open();
+            document.write(text);
+            document.close();
+        } catch (e) {
+            alert('Sync failed: ' + e.message);
+            btn.disabled = false;
+            btn.textContent = 'Sync';
+        }
+    });
+</script>
+
+<script>
+    // Show human-friendly relative time for last sync
+    (function() {
+        const el = document.getElementById('lastSyncedAge');
+        if (!el) return;
+        const ts = parseInt(el.dataset.ts, 10);
+        if (!ts) {
+            el.textContent = 'unknown';
+            return;
+        }
+        function formatAge(ms) {
+            const sec = Math.floor(ms/1000);
+            if (sec < 60) return `${sec}s ago`;
+            const min = Math.floor(sec/60);
+            if (min < 60) return `${min}m ago`;
+            const hr = Math.floor(min/60);
+            if (hr < 24) return `${hr}h ago`;
+            const days = Math.floor(hr/24);
+            return `${days}d ago`;
+        }
+        el.textContent = formatAge(Date.now() - ts);
+
+        const staleBtn = document.getElementById('staleSyncBtn');
+        if (staleBtn) {
+            staleBtn.addEventListener('click', function() { document.getElementById('syncBtn').click(); });
+        }
+    })();
 </script>
 
 <%- include('partials/footer') %>

@@ -1,13 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const db = require('./lib/db');
+const scraper = require('./services/scraper');
 const playwright = require('playwright');
-
-const BASE_URL = 'https://columbus.permitinfo.net';
 
 // In-memory store for Server-Sent Events (SSE) clients
 const sseClients = {};
 
-// Helper function to send log messages to a specific client
 function logToClient(clientId, message) {
   if (sseClients[clientId]) {
     sseClients[clientId].write(`data: ${JSON.stringify({ log: message })}\n\n`);
@@ -17,16 +16,13 @@ function logToClient(clientId, message) {
   }
 }
 
-// Helper function to send a screenshot to a specific client
 async function logScreenshotToClient(page, clientId, message, force = false) {
-  // Only take screenshots if debug mode is on, unless `force` is true.
   if (process.env.DEBUG_MODE !== 'true' && !force) return;
-  logToClient(clientId, message); // Send the text log first
+  logToClient(clientId, message);
   try {
-    const imageBuffer = await page.screenshot({ type: 'png' });
+    const imageBuffer = await page.screenshot({ type: 'png', fullPage: true });
     const imageSrc = `data:image/png;base64,${imageBuffer.toString('base64')}`;
     if (sseClients[clientId]) {
-      // Send a custom 'screenshot' event
       sseClients[clientId].write(`event: screenshot\n`);
       sseClients[clientId].write(`data: ${JSON.stringify({ log: message, imageSrc })}\n\n`);
     }
@@ -39,7 +35,6 @@ router.get('/', (req, res) => {
   res.render('index', { title: 'Columbus Active Plate Changer' });
 });
 
-// Endpoint for the client to establish an SSE connection
 router.get('/events/:id', (req, res) => {
   const clientId = req.params.id;
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
@@ -47,134 +42,62 @@ router.get('/events/:id', (req, res) => {
   req.on('close', () => delete sseClients[clientId]);
 });
 
+// Login route: will return cached permits if present, otherwise scrape and cache
 router.post('/login/:id', async (req, res) => {
-  let browser;
-  let page; // Define page here to access it in the catch block
+  const clientId = req.params.id;
   try {
-    // Launch a new headless browser instance for each login request.
-    browser = await playwright.chromium.launch({
-      args: ['--no-sandbox'] // Necessary for Docker environments
-    });
-    const context = await browser.newContext();
-    page = await context.newPage();
-    const clientId = req.params.id;
-
-    logToClient(clientId, 'Navigating to the initial page...');
-    await page.goto(`${BASE_URL}/index.aspx`);
-
-    logToClient(clientId, 'Clicking "Account Login"...');
-    // Playwright can find elements by the text they contain.
-    await page.getByText('Account Login').click();
-
-    // Wait for the login form elements to be visible.
-    logToClient(clientId, 'Filling out login form...');
-    const usernameField = page.locator('input[name*="txtEmailAddress"]');
-    const passwordField = page.locator('input[name*="txtPassword"]');
-    const loginButton = page.locator('input[name*="btnLogin"]');
-
-    await usernameField.waitFor({ state: 'visible' });
-
-    // Fill in the credentials from environment variables.
-    await usernameField.fill(process.env.SCRAPER_USERNAME);
-    await passwordField.fill(process.env.SCRAPER_PASSWORD);
-
-    logToClient(clientId, 'Submitting login form...');
-    // The login is an AJAX request. Instead of waiting for navigation,
-    // we wait for the specific POST response from the server.
-    await Promise.all([
-      page.waitForResponse(response => response.url().includes('index.aspx') && response.request().method() === 'POST'),
-      loginButton.click(),
-    ]);
-
-    // After the AJAX response is received, wait for the client-side
-    // JavaScript to finish updating the DOM. 'networkidle' is a good
-    // signal that the page has settled down.
-    logToClient(clientId, 'AJAX response received. Waiting for page to update...');
-    await page.waitForLoadState('networkidle');
-
-    logToClient(clientId, 'Login successful. Scraping permit data...');
-
-    // Scrape the permit data from the page.
-    const permitRows = await page.locator('div[id*="_rgnDashboardItem"].dti-dash-item-panel').all();
-    
-    const allPermits = [];
-    for (const row of permitRows) {
-      // Use a try-catch for each field to be resilient against missing data
-      try {
-        // For expired/inactive permits, the detail link may not exist.
-        // Use a short timeout to avoid waiting 30s for nothing.
-        const detailLink = row.locator('span[id*="_lblCartItemDescription"] a');
-        const detailPageUrl = await detailLink.getAttribute('href', { timeout: 1000 }).catch(() => null);
-
-        const permitData = {
-          permitNo: await row.locator('span[id*="_lblPermitNo"]').innerText(),
-          detailPageUrl: detailPageUrl,
-          status: await row.locator('span[id*="_lblStatus"]').innerText(),
-          description: await row.locator('span[id*="_lblCartItemDescription"]').innerText(),
-          validFrom: await row.locator('span[id*="_lblFrom"]').innerText(),
-          validTo: await row.locator('span[id*="_lblTo"]').innerText(),
-          holder: await row.locator('span[id*="_lblPermitHolder"]').first().innerText(),
-          vehicle: await row.locator('span[id*="_lblVehicles"]').innerText(),
-          availablePlates: [],
-        };
-        allPermits.push(permitData);
-      } catch (e) {
-        console.warn('Could not parse a permit row, skipping.', e.message);
-      }
+    db.init();
+    const TTL_HOURS = parseFloat(process.env.PERMIT_TTL_HOURS || '6');
+    const TTL_MS = Math.max(0, TTL_HOURS) * 60 * 60 * 1000;
+    const cachedRows = db.getAllPermitsWithMeta();
+    if (cachedRows && cachedRows.length > 0) {
+      const now = Date.now();
+      const mapped = cachedRows.map(r => ({ ...r.data, lastSynced: r.lastSynced, stale: (now - r.lastSynced) > TTL_MS }));
+      const activeCached = mapped.filter(p => p.status === 'Active');
+      logToClient(clientId, `Serving ${activeCached.length} active permits from cache (${mapped.length} total cached). TTL=${TTL_HOURS}h`);
+      return res.render('permits', { title: 'Your Active Permits', permits: activeCached, baseUrl: scraper.BASE_URL });
     }
 
-    // Filter for active permits only, as requested.
-    const activePermits = allPermits.filter(p => p.status === 'Active');
-
-    // For each active permit, fetch the available license plates in the background.
-    logToClient(clientId, `Found ${activePermits.length} active permits. Fetching available plates for each...`);
-    await Promise.all(activePermits.map(async (permit) => {
-      if (!permit.detailPageUrl) return;
-      logToClient(clientId, `Fetching plates for permit #${permit.permitNo}...`);
-      const permitPage = await context.newPage();
-      try {
-        await permitPage.goto(new URL(permit.detailPageUrl, BASE_URL).href);
-        await permitPage.waitForLoadState('networkidle');
-        const plateRows = await permitPage.locator('div.dti-tile-vehicle-lg').all();
-        for (const plateRow of plateRows) {
-          const plate = await plateRow.locator('a[id*="_lnkVehiclePlate"]').innerText();
-          const name = await plateRow.locator('span[id*="_lblVehicleMake"]').innerText();
-          permit.availablePlates.push({ plate, name });
-        }
-      } catch (e) {
-        logToClient(clientId, `Could not fetch plates for permit #${permit.permitNo}: ${e.message}`);
-      } finally {
-        await permitPage.close();
-      }
-    }));
-
-
-    logToClient(clientId, 'All data scraped. Rendering results.');
-    res.render('permits', { title: 'Your Active Permits', permits: activePermits, baseUrl: BASE_URL });
-
+    logToClient(clientId, 'No cached permits found. Scraping now...');
+    const permits = await scraper.scrapeAndCacheAll(clientId, (id, msg) => logToClient(id, msg));
+    res.render('permits', { title: 'Your Active Permits', permits, baseUrl: scraper.BASE_URL });
   } catch (error) {
-    console.error('An error occurred:', error.message);
-
-    // If an error occurs, try to take a screenshot for debugging and send it to the user.
-    if (page) {
-      try {
-        console.log('Error occurred. Taking a screenshot for debugging...');
-        const imageBuffer = await page.screenshot({ fullPage: true });
-        const imageSrc = `data:image/png;base64,${imageBuffer.toString('base64')}`;
-        return res.render('result', { title: 'Scraper Error', imageSrc, error: error.message });
-      } catch (screenshotError) {
-        console.error('Could not take screenshot:', screenshotError.message);
-      }
-    }
+    console.error('Login error:', error.message);
     res.status(500).render('index', { title: 'Columbus Active Plate Changer', message: `A critical error occurred: ${error.message}` });
-  } finally {
-    // Ensure the browser is always closed.
-    if (browser) {
-      await browser.close();
-    }
   }
 });
 
+// Sync endpoint to force-refresh cached permits
+router.post('/sync/:id', async (req, res) => {
+  const clientId = req.params.id;
+  try {
+    logToClient(clientId, 'Starting synchronization (forced)...');
+    await scraper.scrapeAndCacheAll(clientId, (id, msg) => logToClient(id, msg), true);
+    // reload from DB so we have lastSynced timestamps
+    const now = Date.now();
+    const rows = db.getAllPermitsWithMeta();
+    const mapped = rows.map(r => ({ ...r.data, lastSynced: r.lastSynced, stale: (now - r.lastSynced) > TTL_MS }));
+    const activePermits = mapped.filter(p => p.status === 'Active');
+    res.render('permits', { title: 'Your Active Permits', permits: activePermits, baseUrl: scraper.BASE_URL });
+  } catch (error) {
+    logToClient(clientId, `Sync error: ${error.message}`);
+    res.status(500).render('index', { title: 'Columbus Active Plate Changer', message: `Sync failed: ${error.message}` });
+  }
+});
+
+// Debug: show DB counts
+router.get('/debug/db', (req, res) => {
+  try {
+    db.init();
+    const permits = db.getAllPermits();
+    const session = db.getSession('playwrightStorage');
+    res.json({ permits: permits.length, hasSession: !!session, sessionLastUpdated: session ? session.lastUpdated : null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Keep update-plate route (unchanged logic) — attempts login and performs update
 router.post('/update-plate/:id', async (req, res) => {
   let browser;
   const clientId = req.params.id;
@@ -192,7 +115,7 @@ router.post('/update-plate/:id', async (req, res) => {
 
     // Login
     logToClient(clientId, 'Logging in...');
-    await page.goto(`${BASE_URL}/index.aspx`);
+    await page.goto(`${scraper.BASE_URL}/index.aspx`);
     await page.getByText('Account Login').click();
     const usernameField = page.locator('input[name*="txtEmailAddress"]');
     await usernameField.waitFor({ state: 'visible' });
@@ -207,55 +130,75 @@ router.post('/update-plate/:id', async (req, res) => {
 
     // Navigate to the permit detail page
     logToClient(clientId, 'Navigating to permit detail page...');
-    await page.goto(new URL(detailPageUrl, BASE_URL).href);
+    await page.goto(new URL(detailPageUrl, scraper.BASE_URL).href);
     await page.waitForLoadState('networkidle');
 
     // First, find and uncheck the currently active plate.
-    // The active checkbox has a 'dti-checkbox-selected' class.
     logToClient(clientId, `Finding and unchecking current plate (${currentPlate})...`);
     const activeCheckbox = page.locator('div.dti-checkbox-selected[id$="_rgnCheckBox"]');
-    // Check if an active checkbox exists before trying to click it.
     if (await activeCheckbox.count() > 0) {
-      await Promise.all([
-        // Wait for the server response that confirms the uncheck action.
-        // The response body will no longer contain the 'dti-checkbox-selected' class for this element.
-        // A simple status check is sufficient and more reliable for the uncheck action.
-        page.waitForResponse(resp => resp.url().includes('index.aspx') && resp.status() === 200),
-        activeCheckbox.click()
-      ]);
-      // It's good practice to also wait for the DOM to settle after the response.
-      await page.waitForLoadState('networkidle');
-      await logScreenshotToClient(page, clientId, 'Screenshot after unchecking old plate.');
+      // Click the active checkbox and wait for it to be removed (no longer selected).
+      try {
+        await Promise.all([
+          page.waitForResponse(resp => resp.url().includes('index.aspx') && resp.status() === 200),
+          activeCheckbox.click()
+        ]);
+        // Wait specifically for the checkbox to lose the 'dti-checkbox-selected' class.
+        await page.waitForFunction(() => !document.querySelector('div.dti-checkbox-selected[id$="_rgnCheckBox"]'), { timeout: 10000 }).catch(() => {});
+        // Small pause to allow animations/DOM settle before screenshot
+        await page.waitForTimeout(300);
+        await logScreenshotToClient(page, clientId, 'Screenshot after unchecking old plate.');
+      } catch (e) {
+        logToClient(clientId, `Warning: couldn't confirm uncheck state: ${e.message}`);
+      }
     }
 
-    // Find the vehicle row and click the 'Set Active' checkbox
     logToClient(clientId, `Finding and checking new plate (${plateToActivate})...`);
-    // Make the selector more specific to avoid matching other text on the page.
-    // This finds the div that contains the link with the specific plate text.
     const vehicleRow = page.locator('div.dti-tile-vehicle-lg', { has: page.locator('a[id*="_lnkVehiclePlate"]', { hasText: plateToActivate }) });
-
     const setActiveCheckbox = vehicleRow.locator('div[id$="_rgnCheckBox"]');
-    await Promise.all([
-        // This is the critical change: wait for the server response that explicitly
-        // confirms the new plate is selected by checking for the 'dti-checkbox-selected' class in the response body.
-        page.waitForResponse(async resp => resp.url().includes('index.aspx') && (await resp.text()).includes('dti-checkbox-selected')),
-        setActiveCheckbox.click()
-    ]);
-    await page.waitForLoadState('networkidle');
-    await logScreenshotToClient(page, clientId, 'Screenshot after checking new plate.');
+    try {
+      await Promise.all([
+        setActiveCheckbox.click(),
+        // Wait for server response (status 200) related to the page to be safe
+        page.waitForResponse(resp => resp.url().includes('index.aspx') && resp.status() === 200),
+      ]);
 
-    // Click the final update button
-    // This click triggers a POST and a redirect. We'll wait for the navigation to fully complete.
+      // Wait for the checkbox to have the selected class within this vehicle row
+      const selectedLocator = vehicleRow.locator('div[id$="_rgnCheckBox"].dti-checkbox-selected');
+      await selectedLocator.waitFor({ state: 'visible', timeout: 10000 });
+      // Small pause to allow animations/DOM settle before screenshot
+      await page.waitForTimeout(300);
+      await logScreenshotToClient(page, clientId, 'Screenshot after checking new plate.');
+    } catch (e) {
+      logToClient(clientId, `Warning: couldn't confirm new plate was selected: ${e.message}`);
+      // Best-effort screenshot anyway
+      await page.waitForTimeout(300);
+      await logScreenshotToClient(page, clientId, 'Screenshot after checking new plate (unconfirmed).');
+    }
+
     logToClient(clientId, 'Clicking "Update Permit" to save changes...');
     await Promise.all([
       page.locator('input[name*="btnContinue"][value="Update Permit"]').click(),
-      // Wait for the GET request to the dashboard page and confirm the response body
-      // contains the specific dashboard title element. This is a very reliable
-      // indicator that the final page has loaded successfully.
       page.waitForResponse(async resp => resp.url().includes('index.aspx') && (await resp.text()).includes('<span id="ApplicationContent_PermitLayout_PermitDashboard_lblTitle">Permit Dashboard</span>')),
     ]);
 
     await logScreenshotToClient(page, clientId, 'Final screenshot of dashboard after update.', true);
+
+    // Update cached permit in DB so UI reflects the new active plate immediately
+    try {
+      db.init();
+      const rows = db.getAllPermitsWithMeta();
+      const match = rows.find(r => r.data && r.data.detailPageUrl === detailPageUrl);
+      if (match && match.data && match.data.permitNo) {
+        const updated = Object.assign({}, match.data, { vehicle: plateToActivate });
+        db.savePermit(updated.permitNo, updated);
+        logToClient(clientId, `Cache updated for permit ${updated.permitNo} -> ${plateToActivate}`);
+      } else {
+        logToClient(clientId, 'No matching cached permit found to update.');
+      }
+    } catch (e) {
+      logToClient(clientId, `Failed to update cache: ${e.message}`);
+    }
 
     logToClient(clientId, 'Update successful! The screenshot above confirms the change.');
     res.json({ success: true, message: 'Update complete. Please see the final screenshot for confirmation.' });

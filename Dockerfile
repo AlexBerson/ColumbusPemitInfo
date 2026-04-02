@@ -10,6 +10,18 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Install dependencies. Using 'npm ci' is recommended for CI/CD for faster, more reliable builds.
+# Install system build deps required for native modules (better-sqlite3, etc.)
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		build-essential \
+		python3 \
+		g++ \
+		make \
+		libsqlite3-dev \
+		pkg-config \
+	&& rm -rf /var/lib/apt/lists/*
+
+# Install Node dependencies
 RUN npm ci
 
 # Copy the rest of the application's source code
