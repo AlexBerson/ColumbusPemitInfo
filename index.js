@@ -184,15 +184,34 @@ router.post('/update-plate/:id', async (req, res) => {
 
     await logScreenshotToClient(page, clientId, 'Final screenshot of dashboard after update.', true);
 
-    // Update cached permit in DB so UI reflects the new active plate immediately
+    // Update cached permit in DB so UI reflects the new active plate and holder immediately
     try {
       db.init();
       const rows = db.getAllPermitsWithMeta();
       const match = rows.find(r => r.data && r.data.detailPageUrl === detailPageUrl);
       if (match && match.data && match.data.permitNo) {
-        const updated = Object.assign({}, match.data, { vehicle: plateToActivate });
-        db.savePermit(updated.permitNo, updated);
-        logToClient(clientId, `Cache updated for permit ${updated.permitNo} -> ${plateToActivate}`);
+        const permitNo = match.data.permitNo;
+        // Try to read the updated holder and vehicle from the dashboard page
+        try {
+          const permitRow = page.locator('div[id*="_rgnDashboardItem"].dti-dash-item-panel', { has: page.locator('span[id*="_lblPermitNo"]', { hasText: permitNo }) });
+          // Wait briefly for the permit row to be visible
+          await permitRow.first().waitFor({ state: 'visible', timeout: 5000 });
+          const newHolder = await permitRow.locator('span[id*="_lblPermitHolder"]').first().innerText().catch(() => null);
+          const newVehicle = await permitRow.locator('span[id*="_lblVehicles"]').first().innerText().catch(() => null);
+
+          const updated = Object.assign({}, match.data);
+          if (newVehicle) updated.vehicle = newVehicle;
+          else updated.vehicle = plateToActivate; // fallback
+          if (newHolder) updated.holder = newHolder;
+
+          db.savePermit(updated.permitNo, updated);
+          logToClient(clientId, `Cache updated for permit ${updated.permitNo} -> ${updated.vehicle} / holder: ${updated.holder}`);
+        } catch (innerErr) {
+          // If we couldn't read from the dashboard, at least update the vehicle field
+          const updated = Object.assign({}, match.data, { vehicle: plateToActivate });
+          db.savePermit(updated.permitNo, updated);
+          logToClient(clientId, `Cache vehicle updated for permit ${updated.permitNo} -> ${plateToActivate} (holder not refreshed)`);
+        }
       } else {
         logToClient(clientId, 'No matching cached permit found to update.');
       }
